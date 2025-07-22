@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>インタラクティブな手紙</title>
+    <!-- PDF生成ライブラリ -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        /* --- CSS --- */
+        /* 2種類のフォント（日本語手書き風と筆記体）をインポート */
+        @import url('https://fonts.googleapis.com/css2?family=Cedarville+Cursive&family=Yuji+Syuku&display=swap');
+
+        :root {
+            --bg-color: #f4f0e8;
+            --paper-color: #fffdf9;
+            --line-color: #e0d7c7;
+            --text-color: #2c3e50;
+            --accent-color: #a98f71;
+            --accent-hover-color: #8c735a;
+        }
+
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: var(--bg-color);
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        
+        .mode-toggle {
+            margin-bottom: 15px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            padding: 5px;
+            display: flex;
+        }
+
+        .mode-button {
+            padding: 8px 15px;
+            border: none;
+            background-color: transparent;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: bold;
+            color: #888;
+            border-radius: 6px;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .mode-button.active {
+            background-color: var(--accent-color);
+            color: #fff;
+        }
+
+        .letter-container {
+            width: 100%;
+            max-width: 700px;
+            height: 70vh;
+            background-color: var(--paper-color);
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #pen {
+            position: absolute;
+            width: 60px;
+            display: none;
+            pointer-events: none;
+            transition: top 0.08s ease-out, left 0.08s ease-out;
+            z-index: 10;
+            filter: drop-shadow(2px 2px 3px rgba(0,0,0,0.3));
+        }
+
+        .letter-content {
+            padding: 40px 50px;
+            flex-grow: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .header {
+            position: absolute;
+            transition: all 0.3s ease;
+        }
+
+        .header input {
+            border: none;
+            border-bottom: 1px solid #c9bbae;
+            font-size: 1.3em;
+            padding: 8px 5px;
+            width: 200px;
+            background: transparent;
+            outline: none;
+            font-family: 'Yuji Syuku', 'Cedarville Cursive', serif;
+            color: #5c5c5c;
+        }
+
+        .letter-body {
+            flex-grow: 1;
+            font-size: 1.8em; /* 罫線に合わせるためサイズを微調整 */
+            color: var(--text-color);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow: auto;
+        }
+        
+        /* 横書きモード スタイル */
+        .horizontal-mode #pen { transform: translate(-15px, -55px) rotate(15deg); }
+        .horizontal-mode .header { top: 30px; left: 50px; }
+        .horizontal-mode .letter-body {
+            padding-top: 50px; /* ヘッダーとのスペース */
+            line-height: 2.3; /* 罫線と文字のズレを修正 */
+            background-image: linear-gradient(to bottom, transparent calc(2.3em - 2px), var(--line-color) calc(2.3em - 2px));
+            background-size: 100% 2.3em;
+        }
+        .horizontal-mode .letter-body .cursive { font-family: 'Cedarville Cursive', cursive; font-size: 1.2em; }
+        .horizontal-mode .letter-body .japanese { font-family: 'Yuji Syuku', serif; }
+
+        /* 縦書きモード スタイル */
+        .vertical-mode { writing-mode: vertical-rl; }
+        .vertical-mode #pen { transform: translate(-55px, -15px) rotate(105deg); }
+        .vertical-mode .letter-content { padding: 50px 40px; }
+        .vertical-mode .header { top: 50px; right: 0px; }
+        .vertical-mode .header input { 
+            writing-mode: vertical-rl; /* 宛名も縦書きに */
+            width: auto;
+            height: 250px;
+            border-bottom: none;
+            border-right: 1px solid #c9bbae;
+            padding: 5px 8px;
+        }
+        .vertical-mode .letter-body {
+            padding-right: 60px; /* ヘッダーとのスペース */
+            line-height: 2.3; /* 罫線と文字のズレを修正 */
+            background-image: linear-gradient(to left, transparent calc(2.3em - 2px), var(--line-color) calc(2.3em - 2px));
+            background-size: 2.3em 100%;
+            font-family: 'Yuji Syuku', serif;
+        }
+        /* 縦書きの句読点などを調整 */
+        .vertical-mode .punctuation {
+             text-combine-upright: all;
+        }
+
+        /* スクロールバー */
+        .letter-body::-webkit-scrollbar { width: 10px; height: 10px; }
+        .letter-body::-webkit-scrollbar-track { background: transparent; }
+        .letter-body::-webkit-scrollbar-thumb { background-color: #c9bbae; border-radius: 5px; border: 2px solid var(--paper-color); }
+
+        .controls {
+            width: 100%;
+            max-width: 700px;
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #letter-input {
+            width: 100%;
+            height: 15vh;
+            min-height: 80px;
+            padding: 15px;
+            font-size: 1.1em;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            resize: vertical;
+            box-sizing: border-box;
+            outline-color: var(--accent-color);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .action-button {
+            padding: 12px 25px;
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #fff;
+            background-color: var(--accent-color);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.1s;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .action-button:hover { background-color: var(--accent-hover-color); }
+        .action-button:active { transform: translateY(1px); }
+        #save-pdf-button {
+            background-color: #77a0b8;
+        }
+        #save-pdf-button:hover {
+            background-color: #5a8aa5;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- モード切替ボタン -->
+    <div class="mode-toggle">
+        <button id="jp-mode-btn" class="mode-button">日本語</button>
+        <button id="en-mode-btn" class="mode-button">English</button>
+    </div>
+
+    <!-- 手紙のコンテナ -->
+    <div id="letter-container" class="letter-container">
+        <img src="/image/quill-pen.png" alt="万年筆のペン先" id="pen" onerror="this.style.display='none'">
+        <div class="letter-content">
+            <div class="header">
+                <input type="text" id="recipient">
+            </div>
+            <div id="letter-output" class="letter-body"></div>
+        </div>
+    </div>
+
+    <!-- 操作エリア -->
+    <div class="controls">
+        <textarea id="letter-input"></textarea>
+        <div class="button-group">
+            <button id="write-button" class="action-button">この内容で手紙を書く</button>
+            <button id="save-pdf-button" class="action-button">PDFで保存</button>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const { jsPDF } = window.jspdf;
+
+        const elements = {
+            container: document.getElementById('letter-container'),
+            letterInput: document.getElementById('letter-input'),
+            letterOutput: document.getElementById('letter-output'),
+            pen: document.getElementById('pen'),
+            writeButton: document.getElementById('write-button'),
+            savePdfButton: document.getElementById('save-pdf-button'),
+            jpModeBtn: document.getElementById('jp-mode-btn'),
+            enModeBtn: document.getElementById('en-mode-btn'),
+            recipient: document.getElementById('recipient'),
+        };
+
+        let currentMode = 'horizontal';
+        let typingInterval;
+
+        const setMode = (mode) => {
+            currentMode = mode;
+            elements.letterOutput.innerHTML = '';
+            clearInterval(typingInterval);
+            elements.pen.style.display = 'none';
+
+            if (mode === 'vertical') {
+                elements.container.classList.remove('horizontal-mode');
+                elements.container.classList.add('vertical-mode');
+                elements.jpModeBtn.classList.add('active');
+                elements.enModeBtn.classList.remove('active');
+                elements.recipient.placeholder = "○○へ";
+                elements.letterInput.placeholder = "ここに手紙の内容を入力してください...";
+            } else {
+                elements.container.classList.remove('vertical-mode');
+                elements.container.classList.add('horizontal-mode');
+                elements.enModeBtn.classList.add('active');
+                elements.jpModeBtn.classList.remove('active');
+                elements.recipient.placeholder = "To. My Dearest Friend";
+                elements.letterInput.placeholder = "Enter the content of the letter here...";
+            }
+        };
+
+        const writeLetter = () => {
+            const text = elements.letterInput.value;
+            clearInterval(typingInterval);
+            elements.letterOutput.innerHTML = '';
+
+            if (text.length === 0) {
+                elements.pen.style.display = 'none';
+                return;
+            }
+            
+            elements.pen.style.display = 'block';
+            let charIndex = 0;
+            
+            typingInterval = setInterval(() => {
+                if (charIndex >= text.length) {
+                    clearInterval(typingInterval);
+                    setTimeout(() => { elements.pen.style.display = 'none'; }, 500);
+                    return;
+                }
+
+                const char = text[charIndex];
+                const span = document.createElement('span');
+
+                if (char === '\n') {
+                    span.innerHTML = '<br>';
+                } else {
+                    span.textContent = char;
+                    if (currentMode === 'horizontal') {
+                        const isCursive = /^[a-zA-Z0-9\s.,!?"]*$/.test(char);
+                        span.className = isCursive ? 'cursive' : 'japanese';
+                    } else {
+                        // 縦書き時の句読点クラス
+                        if ('、。'.includes(char)) {
+                            span.className = 'punctuation';
+                        }
+                    }
+                }
+                elements.letterOutput.appendChild(span);
+                
+                const lastSpan = elements.letterOutput.lastChild;
+                if (lastSpan) {
+                    const rect = lastSpan.getBoundingClientRect();
+                    const containerRect = elements.letterOutput.getBoundingClientRect();
+
+                    let penLeft, penTop;
+                    if (currentMode === 'vertical') {
+                        penLeft = rect.left - containerRect.left;
+                        penTop = rect.top - containerRect.top + rect.height;
+                        elements.letterOutput.scrollLeft = lastSpan.offsetLeft - elements.letterOutput.offsetWidth / 2;
+                    } else { // horizontal
+                        penLeft = rect.left - containerRect.left + rect.width;
+                        penTop = rect.top - containerRect.top + rect.height * 0.9;
+                         if (lastSpan.tagName === 'BR') {
+                            penLeft = 5;
+                            penTop = rect.top - containerRect.top + rect.height;
+                        }
+                        elements.letterOutput.scrollTop = elements.letterOutput.scrollHeight;
+                    }
+
+                    elements.pen.style.left = `${penLeft}px`;
+                    elements.pen.style.top = `${penTop}px`;
+                }
+                
+                charIndex++;
+            }, 120);
+            
+            // 改善点1: ボタン押下後に入力欄を白紙にする
+            elements.letterInput.value = '';
+        };
+
+        const saveAsPdf = () => {
+            const letterElement = document.querySelector('.letter-content');
+            elements.pen.style.display = 'none';
+
+            // PDF生成中のフォント崩れを防ぐため、宛名をインプットからdivに一時的に変換
+            const recipientInput = elements.recipient;
+            const recipientValue = recipientInput.value || recipientInput.placeholder;
+            const tempRecipientDiv = document.createElement('div');
+            
+            // スタイルをinputからコピー
+            tempRecipientDiv.textContent = recipientValue;
+            tempRecipientDiv.style.cssText = window.getComputedStyle(recipientInput).cssText;
+            tempRecipientDiv.style.position = 'absolute'; // レンダリングのため
+            
+            // 縦書きモードの場合、スタイルを上書き
+            if(currentMode === 'vertical') {
+                tempRecipientDiv.style.writingMode = 'vertical-rl';
+                tempRecipientDiv.style.borderRight = 'none'; // PDFでは枠線不要
+            }
+            tempRecipientDiv.style.borderBottom = 'none';
+
+            recipientInput.style.display = 'none';
+            recipientInput.parentNode.appendChild(tempRecipientDiv);
+
+            html2canvas(letterElement, {
+                useCORS: true,
+                allowTaint: true,
+                scale: 2,
+                backgroundColor: null, // コンテナ自体の背景は透明に
+                onclone: (clonedDoc) => {
+                    // クローンされたDOMの背景を紙の色にする
+                    clonedDoc.querySelector('.letter-content').style.backgroundColor = 'var(--paper-color)';
+                }
+            }).then(canvas => {
+                const imgData = canvas.toDataURL('image/png');
+                const pdf = new jsPDF({
+                    orientation: currentMode === 'vertical' ? 'portrait' : 'landscape',
+                    unit: 'px',
+                    format: [canvas.width, canvas.height]
+                });
+                pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+                pdf.save('letter.pdf');
+
+                // 一時的に作成したdivを削除し、inputを再表示
+                recipientInput.parentNode.removeChild(tempRecipientDiv);
+                recipientInput.style.display = '';
+            });
+        };
+
+        elements.jpModeBtn.addEventListener('click', () => setMode('vertical'));
+        elements.enModeBtn.addEventListener('click', () => setMode('horizontal'));
+        elements.writeButton.addEventListener('click', writeLetter);
+        elements.savePdfButton.addEventListener('click', saveAsPdf);
+
+        // 改善点1: ページ読み込み時に入力欄を白紙にする
+        elements.letterInput.value = '';
+        // 初期モードを設定
+        setMode('horizontal');
+    });
+    </script>
+</body>
+</html>
